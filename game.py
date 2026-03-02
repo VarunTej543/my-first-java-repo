@@ -2,163 +2,199 @@ import pygame
 import random
 import sys
 
-# Initialize pygame
 pygame.init()
 
-# Screen dimensions
-WIDTH, HEIGHT = 600, 400
+# Screen and grid
+WIDTH, HEIGHT = 640, 480
+SNAKE_SIZE = 20
+COLS = WIDTH // SNAKE_SIZE
+ROWS = HEIGHT // SNAKE_SIZE
+
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Snake Game with Obstacles (WASD)")
+pygame.display.set_caption("Snake — Border Walls Only (WASD)")
 
 # Colors
-WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
 GREEN = (0, 200, 0)
 RED = (200, 0, 0)
-BLUE = (0, 0, 200)
-BLACK = (0, 0, 0)
+BLUE = (0, 120, 200)
+WHITE = (255, 255, 255)
+HINT = (200, 50, 50)
 
-# Clock and sizes
 clock = pygame.time.Clock()
-snake_size = 20
-snake_speed = 10
+font = pygame.font.SysFont("Arial", 18)
 
-# Fonts
-font = pygame.font.SysFont("Arial", 20)
+def draw_snake(snake):
+    for x, y in snake:
+        pygame.draw.rect(screen, GREEN, (x, y, SNAKE_SIZE, SNAKE_SIZE))
 
-def draw_snake(snake_list):
-    for x, y in snake_list:
-        pygame.draw.rect(screen, GREEN, (x, y, snake_size, snake_size))
+def draw_obstacles(obstacles):
+    for ox, oy in obstacles:
+        pygame.draw.rect(screen, BLUE, (ox, oy, SNAKE_SIZE, SNAKE_SIZE))
 
-def message(text, color, x, y):
-    msg = font.render(text, True, color)
-    screen.blit(msg, (x, y))
-
-def random_cell(exclude, width=WIDTH, height=HEIGHT):
-    """Return a random cell (x,y) aligned to snake_size that is not in exclude set."""
-    max_x = (width // snake_size) - 1
-    max_y = (height // snake_size) - 1
+def random_cell(exclude):
+    attempts = 0
     while True:
-        rx = random.randint(0, max_x) * snake_size
-        ry = random.randint(0, max_y) * snake_size
+        rx = random.randrange(COLS) * SNAKE_SIZE
+        ry = random.randrange(ROWS) * SNAKE_SIZE
         if (rx, ry) not in exclude:
             return rx, ry
+        attempts += 1
+        if attempts > 1000:
+            for cx in range(COLS):
+                for cy in range(ROWS):
+                    cell = (cx * SNAKE_SIZE, cy * SNAKE_SIZE)
+                    if cell not in exclude:
+                        return cell
+
+def pattern_border(exclude):
+    """Return border wall cells (as (x,y) tuples) excluding any in exclude."""
+    obs = set()
+    for c in range(COLS):
+        obs.add((c * SNAKE_SIZE, 0))
+        obs.add((c * SNAKE_SIZE, (ROWS - 1) * SNAKE_SIZE))
+    for r in range(ROWS):
+        obs.add((0, r * SNAKE_SIZE))
+        obs.add(((COLS - 1) * SNAKE_SIZE, r * SNAKE_SIZE))
+    return obs - exclude
+
+def wrap_position(x, y):
+    """Wrap coordinates so crossing an edge teleports to the opposite side."""
+    if x < 0:
+        x = WIDTH - SNAKE_SIZE
+    elif x >= WIDTH:
+        x = 0
+    if y < 0:
+        y = HEIGHT - SNAKE_SIZE
+    elif y >= HEIGHT:
+        y = 0
+    return x, y
 
 def game_loop():
-    while True:
-        # Game state
-        x, y = WIDTH // 2, HEIGHT // 2
-        dx, dy = 0, 0
-        snake_list = [(x, y)]
-        snake_length = 1
-        score = 0
+    score = 0
+    speed = 6  # slower default
 
-        # Create obstacles ensuring they don't overlap initial snake
-        exclude = set(snake_list)
-        obstacles = []
-        for _ in range(10):
-            ox, oy = random_cell(exclude)
-            obstacles.append((ox, oy))
-            exclude.add((ox, oy))
+    # initial snake (center)
+    x = (COLS // 2) * SNAKE_SIZE
+    y = (ROWS // 2) * SNAKE_SIZE
+    snake = [(x, y)]
+    snake_length = 3
+    dx, dy = 0, 0
+    last_dx, last_dy = 0, 0
 
-        # Place food not on snake or obstacles
-        food_x, food_y = random_cell(exclude)
-        exclude.add((food_x, food_y))
+    # Use border pattern only
+    exclude = set(snake)
+    obstacles = pattern_border(exclude)
 
-        game_over = False
-        # track last direction to prevent immediate reverse
-        last_dx, last_dy = 0, 0
+    # place food not on snake or obstacles
+    food_x, food_y = random_cell(exclude | obstacles)
 
-        while not game_over:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
+    started = False
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                # WASD controls with prevention of immediate reverse
+                if event.key == pygame.K_w and not (last_dy == SNAKE_SIZE):
+                    dx, dy = 0, -SNAKE_SIZE
+                    started = True
+                elif event.key == pygame.K_s and not (last_dy == -SNAKE_SIZE):
+                    dx, dy = 0, SNAKE_SIZE
+                    started = True
+                elif event.key == pygame.K_a and not (last_dx == SNAKE_SIZE):
+                    dx, dy = -SNAKE_SIZE, 0
+                    started = True
+                elif event.key == pygame.K_d and not (last_dx == -SNAKE_SIZE):
+                    dx, dy = SNAKE_SIZE, 0
+                    started = True
+
+                # Quit key
+                if event.key == pygame.K_q:
                     pygame.quit()
                     sys.exit()
 
-                if event.type == pygame.KEYDOWN:
-                    # WASD controls with prevention of immediate reverse
-                    if event.key == pygame.K_w and not (last_dy == snake_size):
-                        dx, dy = 0, -snake_size
-                    elif event.key == pygame.K_s and not (last_dy == -snake_size):
-                        dx, dy = 0, snake_size
-                    elif event.key == pygame.K_a and not (last_dx == snake_size):
-                        dx, dy = -snake_size, 0
-                    elif event.key == pygame.K_d and not (last_dx == -snake_size):
-                        dx, dy = snake_size, 0
-
-            # Move snake
+        # Only move when started
+        if started:
             x += dx
             y += dy
 
-            # Update last direction only when moving
+            # Wrap around edges
+            x, y = wrap_position(x, y)
+
             if dx != 0 or dy != 0:
                 last_dx, last_dy = dx, dy
 
-            # Check boundaries
-            if x < 0 or x >= WIDTH or y < 0 or y >= HEIGHT:
-                game_over = True
-                break
+            head = (x, y)
+            snake.append(head)
+            if len(snake) > snake_length:
+                del snake[0]
 
-            # Update snake body (store tuples)
-            snake_head = (x, y)
-            snake_list.append(snake_head)
-            if len(snake_list) > snake_length:
-                del snake_list[0]
+            # collisions
+            if head in snake[:-1]:
+                running = False
+            if head in obstacles:
+                running = False
 
-            # Collision with itself
-            if snake_head in snake_list[:-1]:
-                game_over = True
-                break
-
-            # Collision with obstacles (works because both are tuples)
-            if snake_head in obstacles:
-                game_over = True
-                break
-
-            # Eating food
-            if snake_head == (food_x, food_y):
+            # eat food
+            if head == (food_x, food_y):
                 score += 10
                 snake_length += 1
+                # gentle speed increase
+                speed = min(20, speed + 0.4)
+
+                # border pattern remains the same but ensure it doesn't overlap the snake
+                exclude = set(snake)
+                obstacles = pattern_border(exclude)
+
                 # place new food not on snake or obstacles
-                exclude = set(snake_list) | set(obstacles)
-                food_x, food_y = random_cell(exclude)
+                food_x, food_y = random_cell(exclude | obstacles)
 
-                # optional: add a new obstacle as difficulty increases
-                if score % 50 == 0:
-                    exclude.add((food_x, food_y))
-                    new_ob = random_cell(exclude)
-                    obstacles.append(new_ob)
-
-            # Draw everything
-            screen.fill(BLACK)
-            draw_snake(snake_list)
-            pygame.draw.rect(screen, RED, (food_x, food_y, snake_size, snake_size))
-            for ox, oy in obstacles:
-                pygame.draw.rect(screen, BLUE, (ox, oy, snake_size, snake_size))
-
-            message(f"Score: {score}", WHITE, 10, 10)
-            pygame.display.update()
-            clock.tick(snake_speed)
-
-        # Game over screen
+        # draw
         screen.fill(BLACK)
-        message("Game Over! Press Q to Quit or R to Restart", RED, 50, HEIGHT // 2 - 10)
-        message(f"Final Score: {score}", WHITE, 50, HEIGHT // 2 + 20)
-        pygame.display.update()
+        draw_snake(snake)
+        pygame.draw.rect(screen, RED, (food_x, food_y, SNAKE_SIZE, SNAKE_SIZE))
+        draw_obstacles(obstacles)
 
-        # Wait for restart or quit
-        waiting = True
-        while waiting:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
+        # HUD
+        score_surf = font.render(f"Score: {score}", True, WHITE)
+        pattern_surf = font.render("Pattern: Border (fixed)", True, WHITE)
+        hint_surf = font.render("Press W/A/S/D to start. Q to quit.", True, HINT)
+
+        screen.blit(score_surf, (10, 8))
+        screen.blit(pattern_surf, (10, 30))
+        screen.blit(hint_surf, (10, 52))
+
+        if not started:
+            start_hint = font.render("Game paused — press W/A/S/D to start", True, HINT)
+            screen.blit(start_hint, (WIDTH // 2 - start_hint.get_width() // 2, HEIGHT - 40))
+
+        pygame.display.update()
+        clock.tick(speed)
+
+    # game over
+    screen.fill(BLACK)
+    go = font.render("Game Over - Press R to Restart or Q to Quit", True, HINT)
+    final = font.render(f"Final Score: {score}", True, WHITE)
+    screen.blit(go, (WIDTH // 8, HEIGHT // 2 - 20))
+    screen.blit(final, (WIDTH // 2 - 60, HEIGHT // 2 + 10))
+    pygame.display.update()
+
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_q:
                     pygame.quit()
                     sys.exit()
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_q:
-                        pygame.quit()
-                        sys.exit()
-                    if event.key == pygame.K_r:
-                        waiting = False
-                        # break to outer loop to restart game
+                if event.key == pygame.K_r:
+                    waiting = False
+                    return game_loop()
 
 if __name__ == "__main__":
     game_loop()
